@@ -88,7 +88,12 @@
   let fitted = false;
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const initials = (n) => (n || '?').trim().slice(0, 2).toUpperCase();
+  // Como en la app: "Ricardo Pixel" → RP; un solo nombre → sus dos primeras letras.
+  function initials(n) {
+    const parts = String(n || '?').trim().split(/\s+/).filter(Boolean);
+    if (parts.length > 1) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return (parts[0] || '?').slice(0, 2).toUpperCase();
+  }
   function ago(ts, now) {
     const s = Math.max(0, (new Date(now) - new Date(ts)) / 1000);
     if (s < 60) return 'hace segundos';
