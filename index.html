@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="es-MX">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Parvada · Seguimiento</title>
+<link rel="icon" href="icono.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root {
+    --surface: #F6F3EE; --surface-raised: #FFFFFF; --ink: #1B1F1D; --ink-muted: #545B57;
+    --line: #D6D0C6; --brand: #F28C1A; --brand-text: #A3500B; --sos: #C62828; --on-sos: #FFFFFF;
+    --alert: #F5B700; --on-alert: #1B1F1D; --marker-ring: #1B1F1D;
+    --m1: #56B4E9; --m2: #00A884; --m3: #F0E442; --m4: #CC79A7; --m5: #9AD06F; --m6: #B9A3FF; --m7: #FF8FA3; --m8: #E69F00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface: #111513; --surface-raised: #1A1F1C; --ink: #EEF0EC; --ink-muted: #A3AAA5;
+      --line: #2C332F; --brand: #FF9F3D; --brand-text: #FFB066; --sos: #FF5A4F; --on-sos: #0B0E0C;
+      --alert: #F5C542; --on-alert: #111513; --marker-ring: #EEF0EC;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--surface); color: var(--ink); font: 16px/1.45 Inter, system-ui, sans-serif; display: flex; flex-direction: column; }
+  header { padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); background: var(--surface-raised); }
+  header img { width: 36px; height: 36px; border-radius: 8px; }
+  h1 { font: 800 20px/1.2 Archivo, sans-serif; margin: 0; }
+  .muted { color: var(--ink-muted); font-size: 14px; }
+  #banners:empty { display: none; }
+  .banner { padding: 12px 16px; font-weight: 600; }
+  .banner.sos { background: var(--sos); color: var(--on-sos); }
+  .banner.alert { background: var(--alert); color: var(--on-alert); }
+  main { flex: 1; display: grid; grid-template-rows: minmax(300px, 1fr) auto; min-height: 0; }
+  @media (min-width: 900px) { main { grid-template-rows: none; grid-template-columns: 1fr 340px; } }
+  #map { min-height: 300px; }
+  aside { padding: 12px 16px 24px; overflow: auto; border-top: 1px solid var(--line); }
+  @media (min-width: 900px) { aside { border-top: 0; border-left: 1px solid var(--line); } }
+  .member { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .dot { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font: 700 14px Archivo, sans-serif; color: #111513; border: 2px solid var(--marker-ring); flex: none; }
+  .name { font-weight: 600; }
+  .speed { margin-left: auto; font: 800 22px Archivo, sans-serif; font-variant-numeric: tabular-nums; }
+  .speed small { font: 500 12px Inter, sans-serif; color: var(--ink-muted); }
+  .stale { opacity: .6; }
+  .note { margin-top: 16px; font-size: 13px; color: var(--ink-muted); }
+  .empty { padding: 32px 16px; text-align: center; }
+  .pin { background: var(--ink); color: var(--surface); border: 2px solid var(--marker-ring); border-radius: 8px; font: 700 13px Archivo, sans-serif; display: grid; place-items: center; }
+  .leaflet-container { background: var(--surface); font: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <img src="icono.png" alt="">
+  <div>
+    <h1 id="title">Parvada</h1>
+    <div class="muted" id="status">Cargando…</div>
+  </div>
+</header>
+<div id="banners"></div>
+<main>
+  <div id="map"></div>
+  <aside>
+    <div id="members"></div>
+    <p class="note">Esta página se actualiza sola cada 15 segundos. Muestra la última ubicación que llegó con señal: si alguien lleva rato sin reportar, puede estar sin cobertura.</p>
+    <p class="note">Parvada no es un servicio de emergencias. Si crees que alguien está en peligro, llama al 911.</p>
+  </aside>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+  const API = 'https://yvfdvmypqhvqwtkraeox.supabase.co/functions/v1/follow';
+  const TILES_KEY = 'yIgLt5tuwxJb00VLM3Bb';
+  const token = new URLSearchParams(location.search).get('t') || '';
+  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const colorOf = (idx) => css(`--m${(idx % 8) + 1}`);
+
+  const map = L.map('map', { zoomControl: true }).setView([23.6, -102.5], 5);
+  L.tileLayer(`https://api.maptiler.com/maps/${dark ? 'streets-v2-dark' : 'streets-v2'}/256/{z}/{x}/{y}.png?key=${TILES_KEY}`, {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.maptiler.com/copyright/">MapTiler</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).addTo(map);
+  const layer = L.layerGroup().addTo(map);
+  let fitted = false;
+
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const initials = (n) => (n || '?').trim().slice(0, 2).toUpperCase();
+  function ago(ts, now) {
+    const s = Math.max(0, (new Date(now) - new Date(ts)) / 1000);
+    if (s < 60) return 'hace segundos';
+    if (s < 3600) return `hace ${Math.round(s / 60)} min`;
+    return `hace ${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`;
+  }
+  const clock = (ts) => new Date(ts).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+
+  function render(d) {
+    document.title = `${d.road.nombre} · Parvada`;
+    document.getElementById('title').textContent = d.road.nombre;
+    document.getElementById('status').textContent =
+      (d.road.activo ? 'En vivo' : 'Recorrido terminado') + ` · el link vence a las ${clock(d.expira)}`;
+
+    const byIdx = new Map(d.miembros.map((m) => [m.idx, m]));
+    document.getElementById('banners').innerHTML = d.alertas.map((a) => {
+      const who = esc(byIdx.get(a.idx)?.nombre || 'Alguien');
+      if (a.tipo === 'sos') return `<div class="banner sos">SOS de ${who}${a.causa && a.causa !== 'emergencia' ? ` (${esc(a.causa)})` : ''} · ${clock(a.ts)}. Si no sabes nada de ${who}, llama al 911.</div>`;
+      if (a.tipo === 'detenido') return `<div class="banner alert">${who} no se mueve desde hace ${a.minutos ?? 10} min y no responde.</div>`;
+      return `<div class="banner alert">${who} se quedó atrás del grupo.</div>`;
+    }).join('');
+
+    layer.clearLayers();
+    const bounds = [];
+    for (const p of d.pines) {
+      if (p.orden == null && p.tipo !== 'reunion') continue;
+      L.marker([p.lat, p.lon], {
+        icon: L.divIcon({ className: '', html: `<div class="pin" style="width:28px;height:28px">${p.orden ?? '⚑'}</div>`, iconSize: [28, 28] }),
+        title: p.nombre || 'Parada',
+      }).addTo(layer);
+    }
+    for (const m of d.miembros) {
+      const color = colorOf(m.idx);
+      if (m.ruta.length > 1) L.polyline(m.ruta, { color, weight: 5, opacity: 0.9 }).addTo(layer);
+      if (m.ultima) {
+        const pt = [m.ultima.lat, m.ultima.lon];
+        bounds.push(pt);
+        const sos = d.alertas.some((a) => a.tipo === 'sos' && a.idx === m.idx);
+        L.marker(pt, {
+          icon: L.divIcon({
+            className: '',
+            html: `<div class="dot" style="background:${sos ? css('--sos') : color}">${esc(initials(m.nombre))}</div>`,
+            iconSize: [36, 36],
+          }),
+          title: m.nombre,
+        }).addTo(layer).bindPopup(`<b>${esc(m.nombre)}</b><br>${ago(m.ultima.ts, d.ahora)}`);
+        for (const r of m.ruta) bounds.push(r);
+      }
+    }
+    if (!fitted && bounds.length) {
+      map.fitBounds(bounds, { padding: [32, 32], maxZoom: 15 });
+      fitted = true;
+    }
+
+    document.getElementById('members').innerHTML = d.miembros.map((m) => {
+      const u = m.ultima;
+      const stale = !u || (new Date(d.ahora) - new Date(u.ts)) > 5 * 60 * 1000;
+      const kmh = u && u.velocidad != null && u.velocidad > 0.5 ? Math.round(u.velocidad * 3.6) : 0;
+      return `<div class="member ${stale ? 'stale' : ''}">
+        <div class="dot" style="background:${colorOf(m.idx)}">${esc(initials(m.nombre))}</div>
+        <div><div class="name">${esc(m.nombre)}</div>
+          <div class="muted">${u ? `Visto ${ago(u.ts, d.ahora)}${u.bateria != null ? ` · batería ${u.bateria} %` : ''}` : 'Aún no comparte su ubicación'}</div></div>
+        ${u ? `<div class="speed">${kmh}<small> km/h</small></div>` : ''}
+      </div>`;
+    }).join('') || '<div class="empty muted">Aún no hay nadie compartiendo su ubicación.</div>';
+  }
+
+  function fail(msg) {
+    document.getElementById('status').textContent = msg;
+    document.getElementById('members').innerHTML = `<div class="empty">${esc(msg)}</div>`;
+  }
+
+  let timer;
+  async function load() {
+    try {
+      const res = await fetch(`${API}?t=${encodeURIComponent(token)}`, { cache: 'no-store' });
+      const d = await res.json();
+      if (!res.ok) { fail(d.error || 'No se pudo cargar el seguimiento.'); clearInterval(timer); layer.clearLayers(); return; }
+      render(d);
+    } catch (_) {
+      document.getElementById('status').textContent = 'Sin conexión; reintentando…';
+    }
+  }
+  if (!token) fail('Falta el link de seguimiento. Pídelo a quien te lo compartió.');
+  else { load(); timer = setInterval(load, 15000); }
+</script>
+</body>
+</html>
